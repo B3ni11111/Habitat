@@ -17,15 +17,11 @@ GitHub: https://github.com/B3ni11111/Habitat
 habit-tracker/
 ├── frontend/
 │   ├── src/
-│   │   ├── api/axios.ts          ← central axios instance with JWT interceptor
-│   │   ├── context/AuthContext.tsx
-│   │   ├── components/Navbar.tsx
+│   │   ├── api/axios.ts          ← bare axios instance, no auth headers
+│   │   ├── components/Navbar.tsx  ← pastel sticky nav, Dashboard + My Habits links
 │   │   └── pages/
-│   │       ├── DashboardPage.tsx  ← fully redesigned, mock data, no auth
-│   │       ├── HabitsPage.tsx
-│   │       ├── CategoriesPage.tsx
-│   │       ├── LoginPage.tsx
-│   │       └── RegisterPage.tsx
+│   │       ├── DashboardPage.tsx  ← real API data, 3-column desktop grid
+│   │       └── HabitsPage.tsx     ← catalog browser + user-habits management
 │   ├── .env.example
 │   ├── Dockerfile
 │   └── nginx.conf
@@ -58,7 +54,6 @@ Key design decisions:
 ## Environment Variables
 Backend .env (never commit, use .env.example as reference):
 - DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD, DB_NAME
-- JWT_SECRET, JWT_EXPIRATION (e.g. 7d)
 - PORT (default 3000)
 
 Frontend .env:
@@ -80,8 +75,7 @@ Frontend .env:
   ⚠️ TEMPORARY: replaced by real Oracle IAM user ID at deploy time — do NOT build auth logic around this
 
 ## Frontend Rules
-- All API calls go through src/api/axios.ts (central instance)
-- JWT token stored in localStorage key "token"
+- All API calls go through src/api/axios.ts (central instance, no auth headers)
 - Use React Router for navigation
 - Tailwind only for styling — EXCEPTION: exact hex colors not in Tailwind palette
   (e.g. #FF8C69 coral for streak/header accent) may use inline style={{}}
@@ -91,15 +85,17 @@ Frontend .env:
 - Auth is intentionally skipped for now — all routes are public
 - Future plan: Oracle IAM (similar to AWS Cognito) will issue JWTs; backend will validate them
 - Do NOT implement custom JWT/Passport auth — it will be replaced entirely by Oracle IAM
-- Frontend AuthContext + LoginPage are dormant until OCI deploy
+- Frontend AuthContext/LoginPage/RegisterPage files still exist but are unused — will be replaced by Oracle IAM
 
 ## Dashboard Design (current)
-- Route "/" and "/dashboard" go directly to DashboardPage — NO auth guard
-- Uses hardcoded mock user { name: "Benny", avatar: "https://i.pravatar.cc/150?img=8" }
-- Uses hardcoded mock habits (4 habits: Morning Run, Protein Intake, Meditation, Reading)
+- Route "/" and "/dashboard" go directly to DashboardPage — no auth guard
+- All data is real: fetches /users/me, /user-habits, /habit-logs, /habit-logs/streak, /habit-logs/heatmap on mount
 - Color palette: background #faf8f5 (warm off-white), accent #FF8C69 (peach-coral), completions #4ade80 (mint green)
-- Sections: Header (avatar + quote) → Streak (big number + weekly row) → Today's Habits → Activity Heatmap
-- Heatmap: 13-week GitHub-style grid, deterministic mock data via string hash (stable across renders)
+- Layout: sticky pastel Navbar + max-w-[1400px] content area
+- Desktop 3-column grid: [280px Streak card | 1fr Today's Habits | 320px Heatmap]
+  - Streak card: live streak number, weekly row (heatmap data for past days, live logs for today), X/Y done
+  - Today's Habits: boolean → toggle button; numeric → number input + Log button (marks done when value ≥ target)
+  - Heatmap: 13-week GitHub-style grid fed from real API data
 - Daily quote: seeded by day-of-year so it rotates daily without being random
 
 ## API Endpoints
@@ -113,7 +109,7 @@ All routes are public (no auth for now). Mock user_id hardcoded in services.
 | POST | /api/user-habits | Add a habit to user's list `{ habit_id, custom_target }` |
 | DELETE | /api/user-habits/:id | Remove a habit from user's list |
 | GET | /api/habit-logs?date=YYYY-MM-DD | All logs for mock user on a specific date |
-| POST | /api/habit-logs | Upsert a log `{ user_habit_id, date, value, completed, xp_earned }` |
+| POST | /api/habit-logs | Upsert a log `{ userHabitId, date, value, completed, xpEarned }` |
 | GET | /api/habit-logs/heatmap | Last 90 days of logs grouped by date with total completions |
 | GET | /api/habit-logs/streak | Current streak (consecutive days with ≥1 completion) |
 
@@ -159,4 +155,5 @@ All routes are public (no auth for now). Mock user_id hardcoded in services.
 - All routes public for now — Oracle IAM will handle auth at OCI deploy time
 - Hardcoded mock user_id `9198967e-8909-4055-8ab8-60f0f7e24294` used in all services temporarily
 - Dashboard bypasses auth — easier to design/iterate without login flow
-- Heatmap uses deterministic hash seeded by date string to avoid re-render flickering
+- Heatmap is fed from real API data (GET /habit-logs/heatmap); no more mock hash generation
+- Daily quote uses day-of-year seed so it rotates daily without being random per render
