@@ -1,15 +1,52 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import api from '../api/axios';
 
-// ── Mock data ────────────────────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────────────
 
-const MOCK_USER = { name: 'Benny', avatar: 'https://i.pravatar.cc/150?img=8' };
+interface User {
+  id: string;
+  name: string;
+  avatarUrl: string;
+}
 
-const MOCK_HABITS = [
-  { id: '1', name: 'Morning Run',    target: '5 km',        emoji: '🏃', bg: 'bg-orange-50',  ring: 'ring-orange-200'  },
-  { id: '2', name: 'Protein Intake', target: '150g protein', emoji: '🥩', bg: 'bg-emerald-50', ring: 'ring-emerald-200' },
-  { id: '3', name: 'Meditation',     target: '10 minutes',   emoji: '🧘', bg: 'bg-violet-50',  ring: 'ring-violet-200'  },
-  { id: '4', name: 'Reading',        target: '20 pages',     emoji: '📚', bg: 'bg-sky-50',     ring: 'ring-sky-200'     },
-];
+interface Habit {
+  id: string;
+  name: string;
+  icon: string;
+  unit: string;
+  type: 'numeric' | 'boolean';
+  xpValue: number;
+  category: string;
+}
+
+interface UserHabit {
+  id: string;
+  userId: string;
+  habitId: string;
+  customTarget: number;
+  isActive: boolean;
+  habit: Habit;
+}
+
+interface HabitLog {
+  id: string;
+  userHabitId: string;
+  date: string;
+  value: number;
+  completed: boolean;
+  xpEarned: number;
+}
+
+interface HeatmapEntry {
+  date: string;
+  completions: number;
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const TODAY = new Date();
+const TODAY_STR = TODAY.toISOString().split('T')[0];
+const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const QUOTES = [
   'Small steps every day lead to big results.',
@@ -21,42 +58,23 @@ const QUOTES = [
   'Build habits, build your future.',
 ];
 
-const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const STREAK = 12;
+const CATEGORY_COLORS: Record<string, string> = {
+  fitness:      'bg-orange-50',
+  nutrition:    'bg-emerald-50',
+  mindfulness:  'bg-violet-50',
+  learning:     'bg-sky-50',
+  health:       'bg-rose-50',
+  productivity: 'bg-amber-50',
+  sleep:        'bg-indigo-50',
+  social:       'bg-pink-50',
+};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-const TODAY = new Date();
-const TODAY_STR = TODAY.toISOString().split('T')[0];
 
 function getDailyQuote() {
   const start = new Date(TODAY.getFullYear(), 0, 0);
   const day = Math.floor((TODAY.getTime() - start.getTime()) / 86_400_000);
   return QUOTES[day % QUOTES.length];
-}
-
-function hashStr(s: string) {
-  let h = 5381;
-  for (let i = 0; i < s.length; i++) h = (((h << 5) + h) + s.charCodeAt(i)) | 0;
-  return Math.abs(h);
-}
-
-function buildHeatmap(): Record<string, number> {
-  const data: Record<string, number> = {};
-  for (let i = 91; i >= 0; i--) {
-    const d = new Date(TODAY);
-    d.setDate(d.getDate() - i);
-    const k = d.toISOString().split('T')[0];
-    const h = hashStr(k);
-    data[k] = h % 10 < 7 ? (h % 4) + 1 : 0;
-  }
-  // Ensure last STREAK days show as fully completed
-  for (let i = 0; i < STREAK; i++) {
-    const d = new Date(TODAY);
-    d.setDate(d.getDate() - i);
-    data[d.toISOString().split('T')[0]] = 4;
-  }
-  return data;
 }
 
 function heatColor(n: number) {
@@ -67,19 +85,115 @@ function heatColor(n: number) {
   return 'bg-emerald-500';
 }
 
+function categoryBg(category: string) {
+  return CATEGORY_COLORS[(category ?? '').toLowerCase()] ?? 'bg-stone-50';
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const [done, setDone] = useState(new Set(['1', '2']));
-  const dow = TODAY.getDay(); // 0 = Sun
-  const quote = getDailyQuote();
-  const heatmap = useMemo(buildHeatmap, []);
+  const [user, setUser]               = useState<User | null>(null);
+  const [userHabits, setUserHabits]   = useState<UserHabit[]>([]);
+  const [logs, setLogs]               = useState<Record<string, HabitLog>>({});
+  const [streak, setStreak]           = useState(0);
+  const [heatmapData, setHeatmapData] = useState<HeatmapEntry[]>([]);
+  const [numericValues, setNumericValues] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState<string | null>(null);
 
-  // Build 13-week column grid (Sun→Sat rows)
-  const weeks = useMemo(() => {
+  const quote = useMemo(getDailyQuote, []);
+  const dow = TODAY.getDay();
+
+  // ── Initial data fetch ────────────────────────────────────────────────────
+
+  useEffect(() => {
+    Promise.all([
+      api.get('/users/me'),
+      api.get('/user-habits'),
+      api.get(`/habit-logs?date=${TODAY_STR}`),
+      api.get('/habit-logs/streak'),
+      api.get('/habit-logs/heatmap'),
+    ])
+      .then(([userRes, habitsRes, logsRes, streakRes, heatmapRes]) => {
+        setUser(userRes.data);
+        setUserHabits(habitsRes.data);
+
+        const logMap: Record<string, HabitLog> = {};
+        const numMap: Record<string, string> = {};
+        for (const log of logsRes.data as HabitLog[]) {
+          logMap[log.userHabitId] = log;
+          if (log.value != null) numMap[log.userHabitId] = String(log.value);
+        }
+        setLogs(logMap);
+        setNumericValues(numMap);
+
+        setStreak(streakRes.data.streak);
+        setHeatmapData(heatmapRes.data);
+      })
+      .catch(() => setError('Failed to load data. Is the backend running?'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+
+  const toggleBoolean = async (uh: UserHabit) => {
+    const nowCompleted = !(logs[uh.id]?.completed ?? false);
+    const res = await api.post('/habit-logs', {
+      userHabitId: uh.id,
+      date: TODAY_STR,
+      value: null,
+      completed: nowCompleted,
+      xpEarned: nowCompleted ? uh.habit.xpValue : 0,
+    });
+    setLogs(prev => ({ ...prev, [uh.id]: res.data }));
+  };
+
+  const logNumeric = async (uh: UserHabit) => {
+    const raw = numericValues[uh.id];
+    const value = parseFloat(raw);
+    if (isNaN(value)) return;
+    const completed = uh.customTarget != null ? value >= uh.customTarget : value > 0;
+    const res = await api.post('/habit-logs', {
+      userHabitId: uh.id,
+      date: TODAY_STR,
+      value,
+      completed,
+      xpEarned: completed ? uh.habit.xpValue : 0,
+    });
+    setLogs(prev => ({ ...prev, [uh.id]: res.data }));
+  };
+
+  // ── Derived values ────────────────────────────────────────────────────────
+
+  const completedCount = Object.values(logs).filter(l => l.completed).length;
+  const allDone = userHabits.length > 0 && completedCount === userHabits.length;
+
+  const heatmapLookup = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const e of heatmapData) map[e.date] = e.completions;
+    return map;
+  }, [heatmapData]);
+
+  // Current week date strings (Sun → Sat)
+  const weekDates = useMemo(() =>
+    DAY_LABELS.map((_, i) => {
+      const d = new Date(TODAY);
+      d.setDate(TODAY.getDate() - dow + i);
+      return d.toISOString().split('T')[0];
+    })
+  , [dow]);
+
+  const isDayCompleted = (i: number) => {
+    if (i > dow) return false;
+    if (i === dow) return completedCount > 0;
+    return (heatmapLookup[weekDates[i]] ?? 0) > 0;
+  };
+
+  // Heatmap grid (13 weeks × 7 days)
+  const { weeks, monthLabels } = useMemo(() => {
     const start = new Date(TODAY);
     start.setDate(start.getDate() - 90);
-    start.setDate(start.getDate() - start.getDay()); // rewind to Sunday
+    start.setDate(start.getDate() - start.getDay());
 
     const grid: Array<Array<{ d: string; n: number } | null>> = [];
     const cur = new Date(start);
@@ -88,19 +202,15 @@ export default function DashboardPage() {
       const col: Array<{ d: string; n: number } | null> = [];
       for (let i = 0; i < 7; i++) {
         const ds = cur.toISOString().split('T')[0];
-        col.push(cur > TODAY ? null : { d: ds, n: heatmap[ds] ?? 0 });
+        col.push(cur > TODAY ? null : { d: ds, n: heatmapLookup[ds] ?? 0 });
         cur.setDate(cur.getDate() + 1);
       }
       grid.push(col);
     }
-    return grid;
-  }, [heatmap]);
 
-  // One month label per column (first time that month is seen)
-  const monthLabels = useMemo(() => {
-    const labels = new Array<string>(weeks.length).fill('');
+    const labels = new Array<string>(grid.length).fill('');
     const seen = new Set<string>();
-    weeks.forEach((col, wi) => {
+    grid.forEach((col, wi) => {
       for (const cell of col) {
         if (cell) {
           const d = new Date(cell.d);
@@ -113,182 +223,240 @@ export default function DashboardPage() {
         }
       }
     });
-    return labels;
-  }, [weeks]);
 
-  const toggle = (id: string) =>
-    setDone(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+    return { weeks: grid, monthLabels: labels };
+  }, [heatmapLookup]);
 
-  const allDone = done.size === MOCK_HABITS.length;
+  // ── Loading / error screens ───────────────────────────────────────────────
+
+  if (loading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <p className="text-stone-400 text-lg animate-pulse">Loading your habits…</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="text-center space-y-2">
+          <p className="text-red-400 font-medium">{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="text-sm text-stone-400 underline"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen pb-16" style={{ backgroundColor: '#faf8f5' }}>
-      <div className="max-w-lg mx-auto px-4 pt-8 space-y-4">
+    <div className="max-w-[1400px] mx-auto px-8 pt-8 pb-16 space-y-6">
 
-        {/* ── Header ──────────────────────────────────────────────────────── */}
-        <div className="bg-white rounded-3xl shadow-sm border border-stone-100 p-5">
-          <div className="flex items-center gap-4">
+      {/* ── Header ────────────────────────────────────────────────────────── */}
+      <div className="bg-white rounded-3xl shadow-sm border border-stone-100 p-6">
+        <div className="flex items-center justify-between gap-8">
+          <div className="flex items-center gap-5 flex-shrink-0">
             <img
-              src={MOCK_USER.avatar}
+              src={user?.avatarUrl ?? 'https://i.pravatar.cc/150?img=8'}
               alt="avatar"
-              className="w-14 h-14 rounded-full ring-2 ring-offset-2 ring-orange-200 object-cover flex-shrink-0"
+              className="w-16 h-16 rounded-full ring-2 ring-offset-2 ring-orange-200 object-cover"
             />
             <div>
-              <h1 className="text-xl font-bold text-gray-800 leading-tight">
-                Hello, {MOCK_USER.name} 👋
+              <h1 className="text-2xl font-bold text-gray-800">
+                Hello, {user?.name ?? '…'} 👋
               </h1>
               <p className="text-sm text-stone-400 mt-0.5">
                 {TODAY.toLocaleDateString('en-US', {
-                  weekday: 'long',
-                  month: 'long',
-                  day: 'numeric',
+                  weekday: 'long', month: 'long', day: 'numeric',
                 })}
               </p>
             </div>
           </div>
-
-          <div className="mt-4 border-l-[3px] border-orange-300 pl-3 py-0.5">
+          <div className="border-l-[3px] border-orange-300 pl-5 py-1 max-w-lg">
             <p className="text-sm italic text-stone-500 leading-relaxed">"{quote}"</p>
           </div>
         </div>
+      </div>
 
-        {/* ── Streak ──────────────────────────────────────────────────────── */}
-        <div className="bg-white rounded-3xl shadow-sm border border-stone-100 p-5">
+      {/* ── 3-column grid ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-[280px_1fr_320px] gap-6 items-start">
+
+        {/* ── Streak card ─────────────────────────────────────────────────── */}
+        <div className="bg-white rounded-3xl shadow-sm border border-stone-100 p-6 space-y-5">
           <p className="text-[11px] font-semibold text-stone-400 uppercase tracking-widest">
             Current Streak
           </p>
 
-          <div className="flex items-end gap-2 mt-2 mb-5">
-            <span className="text-7xl font-black leading-none" style={{ color: '#FF8C69' }}>
-              {STREAK}
+          <div className="flex items-end gap-2">
+            <span className="text-8xl font-black leading-none" style={{ color: '#FF8C69' }}>
+              {streak}
             </span>
-            <span className="text-stone-400 font-medium pb-2">days 🔥</span>
+            <span className="text-stone-400 font-medium pb-2 text-lg">days 🔥</span>
           </div>
 
           {/* Weekly calendar row */}
           <div className="grid grid-cols-7 gap-1">
             {DAY_LABELS.map((label, i) => {
-              const isCompleted = i < dow;
-              const isToday = i === dow;
-              const isFuture = i > dow;
+              const completed = isDayCompleted(i);
+              const isToday   = i === dow;
+              const isFuture  = i > dow;
               return (
                 <div key={label} className="flex flex-col items-center gap-1.5">
-                  <span className="text-[11px] text-stone-400">{label}</span>
+                  <span className="text-[10px] text-stone-400">{label}</span>
                   <div
-                    className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm transition-all
-                      ${isCompleted
-                        ? 'text-white shadow-sm'
+                    className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
+                      completed
+                        ? 'text-white'
+                        : isFuture
+                        ? 'bg-stone-100 text-stone-300'
                         : isToday
-                        ? 'ring-2 ring-offset-1 font-black'
+                        ? ''
                         : 'bg-stone-100 text-stone-300'
-                      }`}
+                    }`}
                     style={
-                      isCompleted
+                      completed
                         ? { backgroundColor: '#FF8C69', boxShadow: '0 2px 6px rgba(255,140,105,0.35)' }
-                        : isToday
-                        ? { color: '#FF8C69', borderColor: '#FF8C69', outlineColor: '#FF8C69' }
+                        : isToday && !isFuture
+                        ? { boxShadow: '0 0 0 2px white, 0 0 0 3.5px #FF8C69', color: '#FF8C69' }
                         : {}
                     }
                   >
-                    {isCompleted ? (
+                    {completed ? (
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                       </svg>
                     ) : isToday ? (
-                      <span style={{ color: '#FF8C69' }}>{TODAY.getDate()}</span>
-                    ) : (
-                      <span className="text-stone-300 text-xs">{/* future */}</span>
-                    )}
+                      <span style={{ color: '#FF8C69' }} className="font-black">{TODAY.getDate()}</span>
+                    ) : null}
                   </div>
                 </div>
               );
             })}
           </div>
+
+          <div className="pt-2 border-t border-stone-50">
+            <p className="text-sm text-stone-500">
+              <span className="font-bold text-gray-700">{completedCount}</span>
+              <span> / {userHabits.length} habits done today</span>
+            </p>
+          </div>
         </div>
 
         {/* ── Today's Habits ──────────────────────────────────────────────── */}
         <div>
-          <div className="flex items-center justify-between mb-3 px-1">
-            <h2 className="text-lg font-bold text-gray-800">Today's Habits</h2>
+          <div className="flex items-center justify-between mb-4 px-1">
+            <h2 className="text-xl font-bold text-gray-800">Today's Habits</h2>
             <span
-              className={`text-sm font-semibold px-3 py-1 rounded-full transition-colors ${
-                allDone
-                  ? 'bg-emerald-100 text-emerald-600'
-                  : 'bg-stone-100 text-stone-400'
+              className={`text-sm font-semibold px-4 py-1.5 rounded-full transition-colors ${
+                allDone ? 'bg-emerald-100 text-emerald-600' : 'bg-stone-100 text-stone-400'
               }`}
             >
-              {done.size}/{MOCK_HABITS.length}
+              {completedCount} / {userHabits.length}
             </span>
           </div>
 
           {allDone && (
-            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-3 mb-3 text-center">
+            <div className="mb-4 bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-3 text-center">
               <p className="text-sm font-semibold text-emerald-600">
                 🎉 All habits done — amazing work today!
               </p>
             </div>
           )}
 
-          <div className="space-y-3">
-            {MOCK_HABITS.map(h => {
-              const isDone = done.has(h.id);
-              return (
-                <div
-                  key={h.id}
-                  className={`bg-white rounded-2xl shadow-sm border border-stone-100 p-4 flex items-center gap-4 transition-all active:scale-[0.98] ${
-                    isDone ? 'opacity-60' : ''
-                  }`}
-                >
-                  {/* Emoji bubble */}
+          {userHabits.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-stone-100 p-10 text-center text-stone-400">
+              <p className="text-lg mb-1">No habits yet</p>
+              <p className="text-sm">Go to <a href="/habits" className="underline">My Habits</a> to pick some from the catalog.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {userHabits.map(uh => {
+                const log = logs[uh.id];
+                const isCompleted = log?.completed ?? false;
+                const bg = categoryBg(uh.habit.category);
+
+                return (
                   <div
-                    className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0 ${h.bg}`}
-                  >
-                    {h.emoji}
-                  </div>
-
-                  {/* Label */}
-                  <div className="flex-1 min-w-0">
-                    <p
-                      className={`font-semibold text-gray-800 leading-tight ${
-                        isDone ? 'line-through text-stone-400' : ''
-                      }`}
-                    >
-                      {h.name}
-                    </p>
-                    <p className="text-xs text-stone-400 mt-0.5">{h.target} · daily</p>
-                  </div>
-
-                  {/* Toggle button */}
-                  <button
-                    onClick={() => toggle(h.id)}
-                    aria-label={isDone ? 'Mark incomplete' : 'Mark complete'}
-                    className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${
-                      isDone
-                        ? 'text-white'
-                        : 'border-2 border-stone-200 text-transparent hover:border-stone-300'
+                    key={uh.id}
+                    className={`bg-white rounded-2xl shadow-sm border border-stone-100 p-4 flex items-center gap-4 transition-all ${
+                      isCompleted ? 'opacity-65' : ''
                     }`}
-                    style={
-                      isDone
-                        ? { backgroundColor: '#4ade80', boxShadow: '0 2px 8px rgba(74,222,128,0.4)' }
-                        : {}
-                    }
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                    </svg>
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+                    {/* Icon bubble */}
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0 ${bg}`}>
+                      {uh.habit.icon ?? '✦'}
+                    </div>
+
+                    {/* Label */}
+                    <div className="flex-1 min-w-0">
+                      <p className={`font-semibold text-gray-800 leading-tight ${isCompleted ? 'line-through text-stone-400' : ''}`}>
+                        {uh.habit.name}
+                      </p>
+                      <p className="text-xs text-stone-400 mt-0.5">
+                        {uh.customTarget != null && uh.habit.unit
+                          ? `Target: ${uh.customTarget} ${uh.habit.unit} · `
+                          : ''}
+                        {uh.habit.category}
+                      </p>
+                    </div>
+
+                    {/* Action: numeric input OR boolean toggle */}
+                    {uh.habit.type === 'numeric' ? (
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <input
+                          type="number"
+                          min={0}
+                          value={numericValues[uh.id] ?? ''}
+                          onChange={e =>
+                            setNumericValues(prev => ({ ...prev, [uh.id]: e.target.value }))
+                          }
+                          placeholder={uh.habit.unit || '0'}
+                          className="w-24 text-sm border border-stone-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-200 text-center bg-stone-50"
+                        />
+                        <button
+                          onClick={() => logNumeric(uh)}
+                          disabled={!numericValues[uh.id]}
+                          className="text-sm font-semibold px-4 py-2 rounded-xl text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                          style={{ backgroundColor: isCompleted ? '#4ade80' : '#FF8C69' }}
+                        >
+                          {isCompleted ? '✓ Logged' : 'Log'}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => toggleBoolean(uh)}
+                        aria-label={isCompleted ? 'Mark incomplete' : 'Mark complete'}
+                        className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${
+                          isCompleted
+                            ? 'text-white'
+                            : 'border-2 border-stone-200 text-transparent hover:border-stone-300'
+                        }`}
+                        style={
+                          isCompleted
+                            ? { backgroundColor: '#4ade80', boxShadow: '0 2px 8px rgba(74,222,128,0.4)' }
+                            : {}
+                        }
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {/* ── Activity Heatmap ─────────────────────────────────────────────── */}
-        <div className="bg-white rounded-3xl shadow-sm border border-stone-100 p-5">
+        {/* ── Heatmap ─────────────────────────────────────────────────────── */}
+        <div className="bg-white rounded-3xl shadow-sm border border-stone-100 p-6">
           <p className="text-[11px] font-semibold text-stone-400 uppercase tracking-widest mb-4">
             Activity — Last 3 Months
           </p>
@@ -333,7 +501,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Legend */}
-          <div className="flex items-center gap-1 mt-3 justify-end">
+          <div className="flex items-center gap-1 mt-4 justify-end">
             <span className="text-[10px] text-stone-300 mr-1">Less</span>
             {[0, 1, 2, 3, 4].map(c => (
               <div key={c} className={`w-3 h-3 rounded-[2px] ${heatColor(c)}`} />
@@ -342,8 +510,6 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* ── Footer spacer ────────────────────────────────────────────────── */}
-        <div className="h-4" />
       </div>
     </div>
   );

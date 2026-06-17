@@ -1,40 +1,37 @@
-import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { Link, useLocation } from 'react-router-dom';
 
 export default function Navbar() {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
+  const { pathname } = useLocation();
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
+  const navLink = (to: string, label: string) => {
+    const active = pathname === to || (to === '/' && pathname === '/dashboard');
+    return (
+      <Link
+        to={to}
+        className={`text-sm font-medium transition-colors ${
+          active ? 'text-gray-800' : 'text-stone-400 hover:text-gray-700'
+        }`}
+      >
+        {label}
+        {active && (
+          <span className="block h-0.5 mt-0.5 rounded-full" style={{ backgroundColor: '#FF8C69' }} />
+        )}
+      </Link>
+    );
   };
 
   return (
-    <nav className="bg-indigo-600 text-white shadow-md">
-      <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-        <Link to="/" className="text-xl font-bold tracking-tight">
-          HabitTracker
-        </Link>
-        <div className="flex items-center gap-6">
-          <Link to="/dashboard" className="hover:text-indigo-200 transition-colors">
-            Dashboard
-          </Link>
-          <Link to="/habits" className="hover:text-indigo-200 transition-colors">
-            Habits
-          </Link>
-          <Link to="/categories" className="hover:text-indigo-200 transition-colors">
-            Categories
-          </Link>
-          <span className="text-indigo-200 text-sm">
-            {user?.name}
+    <nav className="bg-white border-b border-stone-100 sticky top-0 z-10">
+      <div className="max-w-[1400px] mx-auto px-8 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-lg font-black tracking-tight text-gray-800">Habitat</span>
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-orange-50 text-orange-400 uppercase tracking-widest">
+            beta
           </span>
-          <button
-            onClick={handleLogout}
-            className="bg-indigo-700 hover:bg-indigo-800 px-3 py-1 rounded text-sm transition-colors"
-          >
-            Logout
-          </button>
+        </div>
+        <div className="flex items-center gap-8">
+          {navLink('/', 'Dashboard')}
+          {navLink('/habits', 'My Habits')}
         </div>
       </div>
     </nav>

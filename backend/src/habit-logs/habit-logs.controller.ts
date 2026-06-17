@@ -1,33 +1,29 @@
-import {
-  Controller, Get, Post, Body, Param, Delete,
-  UseGuards, Request, Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Query } from '@nestjs/common';
 import { HabitLogsService } from './habit-logs.service';
 import { CreateHabitLogDto } from './dto/create-habit-log.dto';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
-@UseGuards(JwtAuthGuard)
 @Controller('habit-logs')
 export class HabitLogsController {
   constructor(private readonly habitLogsService: HabitLogsService) {}
 
-  @Get()
-  findAll(@Request() req, @Query('habitId') habitId?: string) {
-    return this.habitLogsService.findAll(req.user.id, habitId);
+  // heatmap and streak must be declared before @Get() to avoid route conflicts
+  @Get('heatmap')
+  getHeatmap() {
+    return this.habitLogsService.getHeatmap();
   }
 
-  @Get(':id')
-  findOne(@Param('id') id: string, @Request() req) {
-    return this.habitLogsService.findOne(id, req.user.id);
+  @Get('streak')
+  getStreak() {
+    return this.habitLogsService.getStreak();
+  }
+
+  @Get()
+  findByDate(@Query('date') date: string) {
+    return this.habitLogsService.findByDate(date);
   }
 
   @Post()
-  create(@Body() dto: CreateHabitLogDto, @Request() req) {
-    return this.habitLogsService.create(dto, req.user.id);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string, @Request() req) {
-    return this.habitLogsService.remove(id, req.user.id);
+  upsertLog(@Body() dto: CreateHabitLogDto) {
+    return this.habitLogsService.upsertLog(dto);
   }
 }

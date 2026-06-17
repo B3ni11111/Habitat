@@ -3,37 +3,37 @@ import {
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
-  CreateDateColumn,
   JoinColumn,
+  CreateDateColumn,
+  Unique,
 } from 'typeorm';
-import { User } from '../users/user.entity';
-import { Habit } from '../habits/habit.entity';
+import { UserHabit } from '../user-habits/user-habit.entity';
 
 @Entity('habit_logs')
+@Unique(['userHabitId', 'date'])
 export class HabitLog {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => Habit, (habit) => habit.logs, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'habitId' })
-  habit: Habit;
+  @Column({ name: 'user_habit_id' })
+  userHabitId: string;
 
-  @Column()
-  habitId: string;
-
-  @ManyToOne(() => User, (user) => user.habitLogs, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'userId' })
-  user: User;
-
-  @Column()
-  userId: string;
+  @ManyToOne(() => UserHabit, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'user_habit_id' })
+  userHabit: UserHabit;
 
   @Column({ type: 'date' })
-  completedAt: string;
+  date: string;
 
-  @Column({ nullable: true })
-  notes: string;
+  @Column({ type: 'numeric', nullable: true })
+  value: number;
 
-  @CreateDateColumn()
+  @Column({ default: false })
+  completed: boolean;
+
+  @Column({ name: 'xp_earned', default: 0 })
+  xpEarned: number;
+
+  @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 }

@@ -1,195 +1,232 @@
-import { useEffect, useState, FormEvent } from 'react';
+import { useEffect, useState } from 'react';
 import api from '../api/axios';
 
-interface Category {
-  id: string;
-  name: string;
-  color: string;
-}
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface Habit {
   id: string;
   name: string;
-  description?: string;
-  frequency: 'daily' | 'weekly';
-  category?: Category;
-  categoryId?: string;
+  icon: string;
+  unit: string;
+  type: 'numeric' | 'boolean';
+  xpValue: number;
+  category: string;
 }
 
+interface UserHabit {
+  id: string;
+  habitId: string;
+  customTarget: number;
+  isActive: boolean;
+  habit: Habit;
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const CATEGORY_COLORS: Record<string, string> = {
+  fitness:      'bg-orange-50 text-orange-500',
+  nutrition:    'bg-emerald-50 text-emerald-500',
+  mindfulness:  'bg-violet-50 text-violet-500',
+  learning:     'bg-sky-50 text-sky-500',
+  health:       'bg-rose-50 text-rose-500',
+  productivity: 'bg-amber-50 text-amber-500',
+  sleep:        'bg-indigo-50 text-indigo-500',
+  social:       'bg-pink-50 text-pink-500',
+};
+
+function categoryClass(category: string) {
+  return CATEGORY_COLORS[(category ?? '').toLowerCase()] ?? 'bg-stone-50 text-stone-500';
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function HabitsPage() {
-  const [habits, setHabits] = useState<Habit[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [showForm, setShowForm] = useState(false);
-  const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
-  const [form, setForm] = useState({ name: '', description: '', frequency: 'daily', categoryId: '' });
-  const [loading, setLoading] = useState(true);
+  const [catalog, setCatalog]         = useState<Habit[]>([]);
+  const [userHabits, setUserHabits]   = useState<UserHabit[]>([]);
+  const [adding, setAdding]           = useState<string | null>(null); // habitId being added
+  const [targetInput, setTargetInput] = useState('');
+  const [loading, setLoading]         = useState(true);
 
   useEffect(() => {
-    Promise.all([api.get('/habits'), api.get('/categories')])
-      .then(([h, c]) => {
-        setHabits(h.data);
-        setCategories(c.data);
+    Promise.all([api.get('/habits/catalog'), api.get('/user-habits')])
+      .then(([catalogRes, userHabitsRes]) => {
+        setCatalog(catalogRes.data);
+        setUserHabits(userHabitsRes.data);
       })
       .finally(() => setLoading(false));
   }, []);
 
-  const openCreate = () => {
-    setEditingHabit(null);
-    setForm({ name: '', description: '', frequency: 'daily', categoryId: '' });
-    setShowForm(true);
+  const addedHabitIds = new Set(userHabits.map(uh => uh.habitId));
+
+  const startAdd = (habitId: string) => {
+    setAdding(habitId);
+    setTargetInput('');
   };
 
-  const openEdit = (habit: Habit) => {
-    setEditingHabit(habit);
-    setForm({
-      name: habit.name,
-      description: habit.description || '',
-      frequency: habit.frequency,
-      categoryId: habit.categoryId || '',
+  const confirmAdd = async (habit: Habit) => {
+    const customTarget = targetInput ? parseFloat(targetInput) : undefined;
+    const res = await api.post('/user-habits', {
+      habitId: habit.id,
+      customTarget: isNaN(customTarget as number) ? undefined : customTarget,
     });
-    setShowForm(true);
+    setUserHabits(prev => [...prev, res.data]);
+    setAdding(null);
   };
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    const payload = { ...form, categoryId: form.categoryId || undefined };
-    if (editingHabit) {
-      const res = await api.patch(`/habits/${editingHabit.id}`, payload);
-      setHabits((prev) => prev.map((h) => (h.id === editingHabit.id ? res.data : h)));
-    } else {
-      const res = await api.post('/habits', payload);
-      setHabits((prev) => [res.data, ...prev]);
-    }
-    setShowForm(false);
+  const removeUserHabit = async (id: string) => {
+    if (!confirm('Remove this habit from your list?')) return;
+    await api.delete(`/user-habits/${id}`);
+    setUserHabits(prev => prev.filter(uh => uh.id !== id));
   };
 
-  const deleteHabit = async (id: string) => {
-    if (!confirm('Delete this habit?')) return;
-    await api.delete(`/habits/${id}`);
-    setHabits((prev) => prev.filter((h) => h.id !== id));
-  };
-
-  if (loading) return <div className="flex items-center justify-center h-64 text-gray-400">Loading...</div>;
+  if (loading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <p className="text-stone-400 text-lg animate-pulse">Loading…</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-3xl font-bold text-gray-800">My Habits</h1>
-        <button
-          onClick={openCreate}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
-        >
-          + Add Habit
-        </button>
-      </div>
+    <div className="max-w-[1400px] mx-auto px-8 pt-8 pb-16">
+      <div className="grid grid-cols-[1fr_1fr] gap-8 items-start">
 
-      {showForm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-md">
-            <h2 className="text-xl font-semibold mb-4">{editingHabit ? 'Edit Habit' : 'New Habit'}</h2>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                <input
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  required
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                <textarea
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  rows={2}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Frequency</label>
-                <select
-                  value={form.frequency}
-                  onChange={(e) => setForm({ ...form, frequency: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+        {/* ── Your Habits ─────────────────────────────────────────────────── */}
+        <div>
+          <div className="flex items-center gap-3 mb-5">
+            <h2 className="text-xl font-bold text-gray-800">Your Active Habits</h2>
+            <span className="text-sm px-3 py-1 bg-stone-100 text-stone-400 rounded-full font-semibold">
+              {userHabits.length}
+            </span>
+          </div>
+
+          {userHabits.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-stone-100 p-10 text-center text-stone-400">
+              <p>No habits tracked yet.</p>
+              <p className="text-sm mt-1">Pick some from the catalog →</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {userHabits.map(uh => (
+                <div
+                  key={uh.id}
+                  className="bg-white rounded-2xl border border-stone-100 shadow-sm p-4 flex items-center gap-4"
                 >
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                <select
-                  value={form.categoryId}
-                  onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0 ${categoryClass(uh.habit.category).split(' ')[0]}`}>
+                    {uh.habit.icon ?? '✦'}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-gray-800">{uh.habit.name}</p>
+                    <p className="text-xs text-stone-400 mt-0.5">
+                      {uh.customTarget != null && uh.habit.unit
+                        ? `Target: ${uh.customTarget} ${uh.habit.unit} · `
+                        : ''}
+                      {uh.habit.type === 'boolean' ? 'Daily check-in' : `Numeric · ${uh.habit.unit || ''}`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${categoryClass(uh.habit.category)}`}>
+                      {uh.habit.category}
+                    </span>
+                    <button
+                      onClick={() => removeUserHabit(uh.id)}
+                      className="text-xs text-stone-300 hover:text-red-400 transition-colors px-2 py-1 rounded-lg hover:bg-red-50"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── Habit Catalog ────────────────────────────────────────────────── */}
+        <div>
+          <div className="flex items-center gap-3 mb-5">
+            <h2 className="text-xl font-bold text-gray-800">Habit Catalog</h2>
+            <span className="text-sm px-3 py-1 bg-stone-100 text-stone-400 rounded-full font-semibold">
+              {catalog.length}
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            {catalog.map(habit => {
+              const alreadyAdded = addedHabitIds.has(habit.id);
+              const isExpanded   = adding === habit.id;
+
+              return (
+                <div
+                  key={habit.id}
+                  className="bg-white rounded-2xl border border-stone-100 shadow-sm p-4 transition-all"
                 >
-                  <option value="">No category</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="flex-1 border border-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-medium transition-colors"
-                >
-                  {editingHabit ? 'Save' : 'Create'}
-                </button>
-              </div>
-            </form>
+                  <div className="flex items-center gap-4">
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl flex-shrink-0 ${categoryClass(habit.category).split(' ')[0]}`}>
+                      {habit.icon ?? '✦'}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-gray-800">{habit.name}</p>
+                      <p className="text-xs text-stone-400 mt-0.5">
+                        {habit.type === 'boolean'
+                          ? 'Daily check-in'
+                          : `Numeric · ${habit.unit || 'units'}`}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${categoryClass(habit.category)}`}>
+                        {habit.category}
+                      </span>
+                      {alreadyAdded ? (
+                        <span className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-stone-100 text-stone-300">
+                          Added ✓
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => isExpanded ? setAdding(null) : startAdd(habit.id)}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-xl text-white transition-all"
+                          style={{ backgroundColor: isExpanded ? '#d1d5db' : '#FF8C69' }}
+                        >
+                          {isExpanded ? 'Cancel' : '+ Add'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Inline target input */}
+                  {isExpanded && (
+                    <div className="mt-3 pt-3 border-t border-stone-50 flex items-center gap-3">
+                      {habit.type === 'numeric' && (
+                        <input
+                          type="number"
+                          min={0}
+                          value={targetInput}
+                          onChange={e => setTargetInput(e.target.value)}
+                          placeholder={`Daily target (${habit.unit || 'units'})`}
+                          className="flex-1 text-sm border border-stone-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-orange-200 bg-stone-50"
+                          autoFocus
+                        />
+                      )}
+                      {habit.type === 'boolean' && (
+                        <p className="flex-1 text-sm text-stone-400">
+                          This habit is a simple daily check-in — no target needed.
+                        </p>
+                      )}
+                      <button
+                        onClick={() => confirmAdd(habit)}
+                        className="text-sm font-semibold px-4 py-2 rounded-xl text-white flex-shrink-0"
+                        style={{ backgroundColor: '#FF8C69' }}
+                      >
+                        Confirm
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
-      )}
 
-      {habits.length === 0 ? (
-        <div className="text-center py-16 text-gray-400">
-          No habits yet. Click "Add Habit" to get started.
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {habits.map((habit) => (
-            <div key={habit.id} className="bg-white border border-gray-200 rounded-xl p-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                {habit.category && (
-                  <span className="w-3 h-3 rounded-full" style={{ backgroundColor: habit.category.color }} />
-                )}
-                <div>
-                  <p className="font-medium text-gray-800">{habit.name}</p>
-                  {habit.description && <p className="text-sm text-gray-400">{habit.description}</p>}
-                </div>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${
-                  habit.frequency === 'daily' ? 'bg-indigo-100 text-indigo-600' : 'bg-amber-100 text-amber-600'
-                }`}>
-                  {habit.frequency}
-                </span>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => openEdit(habit)}
-                  className="text-sm px-3 py-1 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={() => deleteHabit(habit.id)}
-                  className="text-sm px-3 py-1 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      </div>
     </div>
   );
 }

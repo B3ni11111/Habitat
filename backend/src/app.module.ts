@@ -2,10 +2,9 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UsersModule } from './users/users.module';
-import { AuthModule } from './auth/auth.module';
 import { HabitsModule } from './habits/habits.module';
+import { UserHabitsModule } from './user-habits/user-habits.module';
 import { HabitLogsModule } from './habit-logs/habit-logs.module';
-import { CategoriesModule } from './categories/categories.module';
 
 @Module({
   imports: [
@@ -20,15 +19,14 @@ import { CategoriesModule } from './categories/categories.module';
         password: config.get('DB_PASSWORD'),
         database: config.get('DB_NAME'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        synchronize: true,
+        synchronize: false,
       }),
       inject: [ConfigService],
     }),
     UsersModule,
-    AuthModule,
     HabitsModule,
+    UserHabitsModule,
     HabitLogsModule,
-    CategoriesModule,
   ],
 })
 export class AppModule {}

@@ -8,6 +8,5 @@ import { HabitsController } from './habits.controller';
   imports: [TypeOrmModule.forFeature([Habit])],
   providers: [HabitsService],
   controllers: [HabitsController],
-  exports: [HabitsService],
 })
 export class HabitsModule {}

@@ -1,13 +1,20 @@
-import { IsUUID, IsDateString, IsOptional, IsString } from 'class-validator';
+import { IsUUID, IsDateString, IsOptional, IsNumber, IsBoolean } from 'class-validator';
 
 export class CreateHabitLogDto {
   @IsUUID()
-  habitId: string;
+  userHabitId: string;
 
   @IsDateString()
-  completedAt: string;
+  date: string;
 
   @IsOptional()
-  @IsString()
-  notes?: string;
+  @IsNumber()
+  value?: number;
+
+  @IsBoolean()
+  completed: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  xpEarned?: number;
 }
