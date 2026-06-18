@@ -73,13 +73,19 @@ export class HabitLogsService {
   }
 
   async getStreak(): Promise<{ streak: number }> {
+    // Only count days where every active habit was completed
     const rows = await this.logRepo
       .createQueryBuilder('log')
       .leftJoin('log.userHabit', 'uh')
       .select('log.date', 'date')
       .where('uh.userId = :userId', { userId: MOCK_USER_ID })
-      .andWhere('log.completed = :completed', { completed: true })
       .groupBy('log.date')
+      .having(
+        `COUNT(*) FILTER (WHERE log.completed = true) >= (
+          SELECT COUNT(*) FROM user_habits WHERE user_id = :userId AND is_active = true
+        )`,
+        { userId: MOCK_USER_ID },
+      )
       .getRawMany<{ date: unknown }>();
 
     if (rows.length === 0) return { streak: 0 };

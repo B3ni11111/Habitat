@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Delete, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param } from '@nestjs/common';
 import { UserHabitsService } from './user-habits.service';
 import { CreateUserHabitDto } from './dto/create-user-habit.dto';
+import { UpdateUserHabitDto } from './dto/update-user-habit.dto';
 
 @Controller('user-habits')
 export class UserHabitsController {
@@ -14,6 +15,11 @@ export class UserHabitsController {
   @Post()
   create(@Body() dto: CreateUserHabitDto) {
     return this.userHabitsService.create(dto);
+  }
+
+  @Patch(':id')
+  update(@Param('id') id: string, @Body() dto: UpdateUserHabitDto) {
+    return this.userHabitsService.update(id, dto);
   }
 
   @Delete(':id')

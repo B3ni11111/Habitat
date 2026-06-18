@@ -1,7 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import DashboardPage from './pages/DashboardPage';
-import HabitsPage from './pages/HabitsPage';
+import ExplorePage from './pages/ExplorePage';
+import FriendsPage from './pages/FriendsPage';
 
 export default function App() {
   return (
@@ -9,10 +10,11 @@ export default function App() {
       <div className="min-h-screen" style={{ backgroundColor: '#faf8f5' }}>
         <Navbar />
         <Routes>
-          <Route path="/" element={<DashboardPage />} />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/habits" element={<HabitsPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="/explore" element={<ExplorePage />} />
+          <Route path="/friends" element={<FriendsPage />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </div>
     </BrowserRouter>

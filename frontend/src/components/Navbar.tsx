@@ -4,7 +4,7 @@ export default function Navbar() {
   const { pathname } = useLocation();
 
   const navLink = (to: string, label: string) => {
-    const active = pathname === to || (to === '/' && pathname === '/dashboard');
+    const active = pathname === to || (to === '/dashboard' && pathname === '/');
     return (
       <Link
         to={to}
@@ -30,8 +30,9 @@ export default function Navbar() {
           </span>
         </div>
         <div className="flex items-center gap-8">
-          {navLink('/', 'Dashboard')}
-          {navLink('/habits', 'My Habits')}
+          {navLink('/dashboard', 'Dashboard')}
+          {navLink('/explore', 'Explore')}
+          {navLink('/friends', 'Friends')}
         </div>
       </div>
     </nav>
